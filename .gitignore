@@ -9,3 +9,9 @@
 
 # ignore venv
 ./venv/
+
+# ignore config
+config.json
+
+# ignore meta
+meta.json

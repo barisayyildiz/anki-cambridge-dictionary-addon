@@ -12,48 +12,160 @@ sound_path = os.path.join(
 )
 
 class CambridgeSyncDialog(QDialog):
+    SOURCE_FIELDS = [
+        "id", "headword", "definition", "pos",
+        "soundUS", "soundUK",
+        "example_1", "example_2", "example_3", "example_4", "example_5",
+        "entryUrl"
+    ]
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Cambridge Wordlist Sync")
+        self.config = mw.addonManager.getConfig(__name__) or {}
+        self.mapping_combos = {}
 
         # Layout
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
+        
+        # Settings Group
+        settings_group = QGroupBox("Settings")
+        settings_layout = QFormLayout()
 
-        # JSESSIONID input
-        layout.addWidget(QLabel("Cambridge JSESSIONID Token"))
         self.jsessionid_input = QLineEdit()
-        self.jsessionid_input.setText("06ED2C0B8BEFC1A02073640DE2A28BED-n1")
-        layout.addWidget(self.jsessionid_input)
+        self.jsessionid_input.setText(self.config.get("jsessionid", "06ED2C0B8BEFC1A02073640DE2A28BED-n1"))
+        settings_layout.addRow("JSESSIONID:", self.jsessionid_input)
 
-        # Wordlist ID input
-        layout.addWidget(QLabel("Cambridge Wordlist ID:"))
         self.wordlist_input = QLineEdit()
-        self.wordlist_input.setText("88939097")
-        layout.addWidget(self.wordlist_input)
+        self.wordlist_input.setText(self.config.get("wordlist_id", "88939097"))
+        settings_layout.addRow("Wordlist ID:", self.wordlist_input)
 
-        # Deck selector
-        layout.addWidget(QLabel("Select Anki Deck:"))
         self.deck_selector = QComboBox()
         self.deck_selector.addItems(mw.col.decks.all_names())
-        layout.addWidget(self.deck_selector)
+        if self.config.get("target_deck"):
+            self.deck_selector.setCurrentText(self.config.get("target_deck"))
+        settings_layout.addRow("Target Deck:", self.deck_selector)
+
+        self.model_selector = QComboBox()
+        self.model_selector.addItems(sorted([m['name'] for m in mw.col.models.all()]))
+        if self.config.get("target_model"):
+            self.model_selector.setCurrentText(self.config.get("target_model"))
+        self.model_selector.currentIndexChanged.connect(self.on_model_change)
+        settings_layout.addRow("Note Type:", self.model_selector)
+
+        settings_group.setLayout(settings_layout)
+        main_layout.addWidget(settings_group)
+
+        # Mappings Group
+        mapping_group = QGroupBox("Field Mapping")
+        mapping_layout = QVBoxLayout()
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        self.mapping_grid = QGridLayout()
+        scroll_content.setLayout(self.mapping_grid)
+        scroll.setWidget(scroll_content)
+        
+        mapping_layout.addWidget(scroll)
+        mapping_group.setLayout(mapping_layout)
+        main_layout.addWidget(mapping_group)
 
         # Sync button
         self.sync_button = QPushButton("Sync")
         self.sync_button.clicked.connect(self.on_sync)
-        layout.addWidget(self.sync_button)
+        main_layout.addWidget(self.sync_button)
 
-        self.setLayout(layout)
+        self.setLayout(main_layout)
+        self.resize(600, 700)
+        
+        # Trigger initial mapping load
+        self.on_model_change()
 
-    def on_sync(self):
+    def on_model_change(self):
+        # Clear existing items
+        for i in reversed(range(self.mapping_grid.count())): 
+            self.mapping_grid.itemAt(i).widget().setParent(None)
+        self.mapping_combos = {}
+
+        model_name = self.model_selector.currentText()
+        model = mw.col.models.by_name(model_name)
+        if not model: return
+        
+        field_names = [f['name'] for f in model['flds']]
+        saved_mappings = self.config.get("model_mappings", {}).get(model_name, {})
+
+        # Add Headers
+        self.mapping_grid.addWidget(QLabel("<b>Cambridge Data</b>"), 0, 0)
+        self.mapping_grid.addWidget(QLabel("<b>Anki Field</b>"), 0, 1)
+
+        for i, source in enumerate(self.SOURCE_FIELDS):
+            self.mapping_grid.addWidget(QLabel(source), i+1, 0)
+            
+            combo = QComboBox()
+            combo.addItem("<Ignore>", None)
+            combo.addItems(field_names)
+            
+            # Default or Saved selection
+            if source in saved_mappings and saved_mappings[source] in field_names:
+                combo.setCurrentText(saved_mappings[source])
+            else:
+                # heuristic matching
+                for f in field_names:
+                    # simpler heuristic: match if source key is contained in field key
+                    # e.g. "headword" in "Front (Headword)"
+                    # We might want to Map "headword" -> "Front" though.
+                    # Let's keep it simple for now.
+                    if f.lower() in source.lower() or source.lower() in f.lower():
+                        combo.setCurrentText(f)
+                        break
+            
+            self.mapping_grid.addWidget(combo, i+1, 1)
+            self.mapping_combos[source] = combo
+
+    def save_settings(self):
         jsessionid = self.jsessionid_input.text().strip()
         wordlist_id = self.wordlist_input.text().strip()
+        model_name = self.model_selector.currentText().strip()
+        
+        current_mapping = {
+            src: combo.currentText() 
+            for src, combo in self.mapping_combos.items() 
+            if combo.currentText() != "<Ignore>"
+        }
+        
+        all_mappings = self.config.get("model_mappings", {})
+        all_mappings[model_name] = current_mapping
+
+        self.config.update({
+            "jsessionid": jsessionid,
+            "wordlist_id": wordlist_id,
+            "target_deck": self.deck_selector.currentText(),
+            "target_model": model_name,
+            "model_mappings": all_mappings
+        })
+        mw.addonManager.writeConfig(__name__, self.config)
+
+    def closeEvent(self, event):
+        self.save_settings()
+        event.accept()
+
+    def on_sync(self):
+        self.save_settings()
+        
+        jsessionid = self.config["jsessionid"]
+        wordlist_id = self.config["wordlist_id"]
         deck_name = self.deck_selector.currentText().strip()
+        model_name = self.model_selector.currentText().strip()
+        current_mapping = self.config["model_mappings"].get(model_name, {})
         deck_id = mw.col.decks.id(deck_name)
+        
         if not wordlist_id:
             showInfo("Please enter a Wordlist ID.")
             return
-        print(wordlist_id, deck_id, jsessionid)
-        sync_wordlist(wordlist_id, deck_id, jsessionid)
+
+        # Run Sync
+        sync_wordlist(wordlist_id, deck_id, jsessionid, model_name, current_mapping)
         self.close()
 
 def get_headers(cookie):
@@ -74,42 +186,100 @@ def download_sound(url, file_name, cookie):
     with open(os.path.join(sound_path, file_name), "wb") as f:
         f.write(r.content)
 
-def sync_wordlist(wordlist_id, deck_id, jsessionid):
+def sync_wordlist(wordlist_id, deck_id, jsessionid, model_name, mapping):
     entries = fetch_all_entries(wordlist_id, jsessionid)
     added = 0
+    model = mw.col.models.by_name(model_name)
+    mw.col.models.set_current(model)
+
     for e in entries:
         source_id = str(e["id"])
-        if mw.col.find_notes(f'SourceID:"{source_id}"'):
-            continue
-        model = mw.col.models.by_name("Basic")
-        mw.col.models.set_current(model)        
-        note = mw.col.newNote()
-        # print(note.fields)
-        note["Word"] = e["headword"]
-        note["Definition"] = e["definition"]
-        note["SourceID"] = source_id
-
-        entry_url = e["entryUrl"]
-        entry_html = requests.get(entry_url, headers=get_headers(jsessionid)).text
-        soup = BeautifulSoup(entry_html, 'html.parser')
-        sense_id = e["senseId"]
-        sentencesHtml = soup.select(
-            f'div.def-block[data-wl-senseid="{sense_id}"] div.def-body div.examp.dexamp'
-        )
-        sentences = [s.text for s in sentencesHtml]
-
-        for idx in range(min(5, len(sentences))):
-            note[f"Sentence{idx+1}"] = sentences[idx]
-
-        # save sound
-        sound_file_name = f"Cambridge_{source_id}.mp3"
-        if e["soundUSMp3"] != None:
-            download_sound(e["soundUSMp3"], sound_file_name, jsessionid)
-            note["Sound"] = f"[sound:{sound_file_name}]"
+        # Check for duplicates using SourceID if mapped, otherwise just proceed (or use a dedicated ID field if possible)
+        # For now, let's assume we want to avoid dupes. We can search in the first mapped field 
+        # but that's risky. Ideally we have a dedicated ID field.
+        # Let's search if "SourceID" is in the mapping or we just check if we have a note with this SourceID
+        # The previous code hardcoded "SourceID". We should functionality to map an ID field, but for now
+        # let's proceed without strict dup checking for custom types for now unless mapped.
         
-        mw.col.addNote(note)
-        mw.col.decks.select(deck_id)
-        added += 1
+        # Actually, let's just create the note.
+        note = mw.col.newNote()
+        
+        # Data preparation
+        data = {
+            "id": source_id,
+            "headword": e.get("headword", ""),
+            "definition": e.get("definition", ""),
+            "pos": e.get("pos", ""),
+            "entryUrl": e.get("entryUrl", "")
+        }
+
+        # Check for duplicates if Source ID is mapped
+        if "id" in mapping:
+            target_field = mapping["id"]
+            if target_field:
+                safe_id = source_id.replace('"', '\\"')
+                query = f'"{target_field}:{safe_id}"'
+                if mw.col.find_notes(query):
+                    continue
+
+
+        # Sentences
+        entry_url = e.get("entryUrl")
+        if entry_url:
+            try:
+                entry_html = requests.get(entry_url, headers=get_headers(jsessionid)).text
+                soup = BeautifulSoup(entry_html, 'html.parser')
+                sense_id = e.get("senseId")
+                if sense_id:
+                    sentencesHtml = soup.select(
+                        f'div.def-block[data-wl-senseid="{sense_id}"] div.def-body div.examp.dexamp'
+                    )
+                    sentences = [s.text.strip() for s in sentencesHtml]
+                    for idx in range(5):
+                        key = f"example_{idx+1}"
+                        if idx < len(sentences):
+                            data[key] = sentences[idx]
+                        else:
+                            data[key] = ""
+            except Exception as err:
+                print(f"Error fetching sentences for {data['headword']}: {err}")
+
+        # Downloads
+        if "soundUS" in mapping.keys():
+            us_url = e.get("soundUSMp3")
+            if us_url:
+                filename = f"Cambridge_US_{source_id}.mp3"
+                try:
+                    download_sound(us_url, filename, jsessionid)
+                    data["soundUS"] = f"[sound:{filename}]"
+                except:
+                    pass
+        
+        if "soundUK" in mapping.keys():
+            uk_url = e.get("soundUKMp3")
+            if uk_url:
+                filename = f"Cambridge_UK_{source_id}.mp3"
+                try:
+                    download_sound(uk_url, filename, jsessionid)
+                    data["soundUK"] = f"[sound:{filename}]"
+                except:
+                    pass
+
+        # Apply mapping
+        has_mapped_fields = False
+        for source_field, target_field in mapping.items():
+            if target_field and source_field in data:
+                note[target_field] = data[source_field]
+                has_mapped_fields = True
+        
+        # Minimal duplicate check if "SourceID" field exists in note type? 
+        # Previous code used 'SourceID' field. Let's keep it if the user maps it? 
+        # For now, just add.
+        
+        if has_mapped_fields:
+            mw.col.addNote(note)
+            mw.col.decks.select(deck_id)
+            added += 1
 
     mw.col.save()
     showInfo(f"Added {added} new words to '{mw.col.decks.name(deck_id)}'.")
