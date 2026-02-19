@@ -1,0 +1,6 @@
+{
+  "name": "Cambridge Wordlist Sync",
+  "package": "anki-cambridge-addon",
+  "version": "0.1",
+  "min_anki_version": "2.1.50"
+}

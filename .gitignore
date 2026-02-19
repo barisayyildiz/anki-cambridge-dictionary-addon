@@ -1,0 +1,11 @@
+# ignore pycache
+./__pycache__/
+
+# ignore gemini
+./gemini/
+
+# ignore sounds
+./sounds/
+
+# ignore venv
+./venv/
