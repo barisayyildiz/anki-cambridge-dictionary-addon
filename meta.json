@@ -5,21 +5,6 @@
         "target_model": "Cambridge_Dictionary_Type",
         "wordlist_id": "88939097",
         "model_mappings": {
-            "Basic": {
-                "id": "SourceID",
-                "headword": "Word",
-                "definition": "Definition",
-                "soundUS": "Sound",
-                "soundUK": "Sound",
-                "example_1": "Sentence1",
-                "example_2": "Sentence2",
-                "example_3": "Sentence3",
-                "example_4": "Sentence4",
-                "example_5": "Sentence5"
-            },
-            "0 Neri's Frequent Words (E to F)": {
-                "Word": "Word"
-            },
             "Cambridge_Dictionary_Type": {
                 "id": "SourceID",
                 "headword": "Word",
