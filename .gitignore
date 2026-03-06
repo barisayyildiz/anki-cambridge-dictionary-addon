@@ -1,14 +1,14 @@
 # ignore pycache
-./__pycache__/
+__pycache__/
 
 # ignore gemini
-./gemini/
+gemini/
 
 # ignore sounds
-./sounds/
+sounds/
 
 # ignore venv
-./venv/
+venv/
 
 # ignore config
 config.json
