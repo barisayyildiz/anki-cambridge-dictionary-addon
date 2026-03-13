@@ -1,7 +1,6 @@
 from aqt.qt import *
-from aqt import mw, gui_hooks
+from aqt import mw
 from aqt.utils import showInfo
-from anki import hooks
 from bs4 import BeautifulSoup
 import requests
 import os
@@ -188,9 +187,6 @@ def download_sound(url, file_name, cookie):
         f.write(r.content)
 
 def sync_wordlist(wordlist_id, deck_id, jsessionid, model_name, mapping):
-    config = mw.addonManager.getConfig(__name__) or {}
-    ignored_ids = set(config.get("ignored_ids", []))
-
     entries = fetch_all_entries(wordlist_id, jsessionid)
     added = 0
     model = mw.col.models.by_name(model_name)
@@ -198,10 +194,6 @@ def sync_wordlist(wordlist_id, deck_id, jsessionid, model_name, mapping):
 
     for e in entries:
         source_id = str(e["id"])
-        
-        if source_id in ignored_ids:
-            continue
-        
         # Check for duplicates using SourceID if mapped, otherwise just proceed (or use a dedicated ID field if possible)
         # For now, let's assume we want to avoid dupes. We can search in the first mapped field 
         # but that's risky. Ideally we have a dedicated ID field.
@@ -315,27 +307,3 @@ def fetch_all_entries(wordlist_id, cookie):
 action = QAction("Sync Cambridge Wordlist", mw)
 action.triggered.connect(lambda: CambridgeSyncDialog().exec())
 mw.form.menuTools.addAction(action)
-
-def on_notes_deleted(col, note_ids):
-    config = mw.addonManager.getConfig(__name__) or {}
-    ignored_ids = set(config.get("ignored_ids", []))
-    added_new = False
-    
-    for nid in note_ids:
-        try:
-            note = mw.col.getNote(nid)
-            # Find the ID field name for this note's model
-            target_field = config.get("model_mappings", {}).get(note.model()['name'], {}).get("id")
-            if target_field and target_field in note:
-                deleted_cambridge_id = note[target_field]
-                if deleted_cambridge_id:
-                    ignored_ids.add(deleted_cambridge_id)
-                    added_new = True
-        except Exception as e:
-            print(f"Error processing deleted note: {e}")
-            
-    if added_new:
-        config["ignored_ids"] = list(ignored_ids)
-        mw.addonManager.writeConfig(__name__, config)
-
-hooks.notes_will_be_deleted.append(on_notes_deleted)
